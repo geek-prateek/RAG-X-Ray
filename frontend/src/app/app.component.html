@@ -1,0 +1,85 @@
+<div class="app-shell">
+  <header class="topbar">
+    <button class="brand" (click)="reset()"><span class="brand-icon">✳</span><span>RAG <strong>X-Ray</strong></span></button>
+    <div class="header-right"><span class="tag">Learn by seeing the data</span><span class="online"><span></span> Local project</span></div>
+  </header>
+  <div class="error" *ngIf="error">{{error}} <button (click)="error=''">×</button></div>
+  <main class="landing" *ngIf="!docs.length">
+    <span class="hero-glyph">✦</span><div class="eyebrow">INTERACTIVE RAG PLAYGROUND</div>
+    <h1>Don't just ask AI.<br><em>See how it finds answers.</em></h1>
+    <p>Upload a document. Follow each transformation. Explore real embeddings, ranking and evidence — without technical clutter.</p>
+    <label class="drop-zone" (dragover)="$event.preventDefault()" (drop)="onDrop($event)">
+      <span class="upload-icon">⇧</span><strong>Drop your document here</strong>
+      <small>PDF, TXT or Markdown · Up to 10 MB</small><span class="primary-button">Choose documents</span>
+      <input type="file" multiple accept=".pdf,.txt,.md" (change)="uploadFiles($any($event.target).files);$any($event.target).value=''" hidden>
+    </label>
+    <div class="hint">Start with <strong>sample_docs/employee_handbook.txt</strong> included in the ZIP.</div>
+  </main>
+  <div class="workspace" *ngIf="docs.length">
+    <aside class="sidebar">
+      <div class="side-section"><div class="side-heading"><span>YOUR LIBRARY</span><span class="count">{{docs.length}}</span></div>
+        <div class="doc-row" *ngFor="let d of docs" [class.selected]="currentDoc?.id===d.id">
+          <input type="checkbox" [checked]="selectedIds.has(d.id)" (change)="toggleDoc(d.id,$any($event.target).checked)" [disabled]="d.status!=='ready'" [attr.aria-label]="'Use '+d.filename">
+          <span class="doc-icon">▤</span>
+          <button class="doc-label" (click)="loadDoc(d.id,true)" [title]="d.filename"><strong>{{d.filename}}</strong><small [class.ready]="d.status==='ready'">{{d.status==='ready'?'✓ Searchable':d.status==='failed'?'✕ Failed':(d.stage_count||0)+'/6 steps completed'}}</small></button>
+          <button class="icon-button" (click)="removeDoc(d)" title="Delete document">×</button>
+        </div>
+        <label class="add-document">+ Add document<input type="file" multiple accept=".pdf,.txt,.md" (change)="uploadFiles($any($event.target).files);$any($event.target).value=''" hidden></label>
+      </div>
+      <div class="chat-group"><div class="chat-title">✦ ASK YOUR KNOWLEDGE</div>
+        <div class="chat-empty" *ngIf="!answer"><span class="chat-star">✳</span><p>Ask anything about your selected documents.</p><span class="subtle">The answer will include source evidence.</span></div>
+        <div class="history" *ngIf="answer"><span class="question-bubble">{{question}}</span><span class="answer-bubble">Answer ready! Explore the details →</span></div>
+      </div>
+      <div class="composer"><textarea [(ngModel)]="question" rows="2" placeholder="Ask a question…" (keydown.control.enter)="ask()"></textarea>
+        <div class="composer-bottom"><span>{{chosenDocs.length}} selected · Ctrl + Enter</span><button class="send" (click)="ask()" [disabled]="busy||!chosenDocs.length||!question.trim()">{{busy?'Thinking…':'Ask →'}}</button></div>
+      </div>
+    </aside>
+    <section class="main-panel">
+      <div class="main-scroll">
+        <ng-container *ngIf="!answer">
+          <div class="workspace-head"><div><div class="eyebrow">YOUR WORKSPACE</div><h2>Knowledge, made visible.</h2><p>Every document has a story. Click to follow its data.</p></div><span class="sparkle">✳</span></div>
+          <div class="feature-grid"><div class="feature"><span>▤</span><strong>{{docs.length}}</strong><small>Documents</small></div><div class="feature"><span>◈</span><strong>{{ready.length}}</strong><small>Ready to ask</small></div></div>
+          <div class="document-card" *ngIf="currentDoc as d">
+            <div class="document-top"><span class="document-illustration">▤</span><div class="grow"><strong>{{d.filename}}</strong><small>{{d.status==='ready'?'Ready to search':d.status==='failed'?'Indexing failed':'Preparing searchable knowledge…'}}</small></div><span class="status" [class.success]="d.status==='ready'">{{d.status}}</span></div>
+            <div class="progress" *ngIf="d.status==='processing'||d.status==='queued'"><div [style.width.%]="stageProgress"></div></div>
+            <p class="warning" *ngIf="d.error">{{d.error}}</p>
+            <button class="explore-btn" (click)="openJourney('document')">✦ Explore Document Journey <span>→</span></button>
+          </div>
+          <div class="empty-prompt" *ngIf="!currentDoc"><span>↑</span> Select a document to explore its journey.</div>
+        </ng-container>
+        <ng-container *ngIf="answer as a">
+          <div class="answer-heading"><div><div class="eyebrow">AI ANSWER</div><h2>Here's what I found.</h2></div><span class="status success">{{a.answer_mode.startsWith('ollama')?'AI generated': 'Source excerpts'}}</span></div>
+          <div class="answer-text markdown-body" [innerHTML]="renderMarkdown(a.answer)"></div>
+          <div class="source-section"><div class="section-label">SOURCE EVIDENCE <span>{{a.sources.length}} chunks</span></div>
+            <button class="source-row" *ngFor="let s of a.sources;let i=index" (click)="selectSource(s)" [class.active]="selectedSource?.id===s.id"><span class="source-number">{{i+1}}</span><span class="grow"><strong>{{s.filename}}</strong><small>Page {{s.page}} · cosine similarity {{s.score.toFixed(3)}}</small></span><span>↗</span></button>
+            <div class="highlight-panel" *ngIf="selectedSource as s"><div class="section-label">SUPPORTING PASSAGE · {{s.filename}}, PAGE {{s.page}}</div><div class="highlight-text">{{s.text}}</div><small>Actual indexed chunk text. Highlighting shows the cited passage, not a proof of claim-level entailment.</small></div>
+          </div>
+          <button class="explore-btn" (click)="openJourney('question')">✦ Explore Question Journey <span>→</span></button>
+          <button class="experiment-link" (click)="compareDoc()">⚡ What if I change Top-K?</button>
+        </ng-container>
+      </div>
+      <section class="journey" *ngIf="journey">
+        <div class="journey-head"><div><div class="eyebrow">DATA JOURNEY</div><h3>{{journey==='document'?'From file to knowledge':'From question to answer'}}</h3><p>Follow the values. Understand every transformation.</p></div><button class="close" (click)="journey=null" title="Close">×</button></div>
+        <div class="steps"><button *ngFor="let stage of stages;let i=index" (click)="chooseStep(i)" [class.active]="stepIndex===i"><span>{{i+1}}</span>{{stage.name}}</button></div>
+        <ng-container *ngIf="currentStep as s"><div class="journey-card" [class.flash]="visualPulse">
+          <div class="step-heading"><span class="step-number">STEP {{stepIndex+1}} OF {{stages.length}}</span><h3>{{s.name}}</h3></div>
+          <div class="data-block"><div class="block-name"><span class="block-circle">1</span> BEFORE <small>What did we have?</small></div><pre>{{preview(s.before)}}</pre><button *ngIf="hasMore(s.before)" class="text-button" (click)="showMore=!showMore">{{showMore?'Show less':'Show all values'}}</button></div>
+          <div class="transform-arrow">↓</div>
+          <div class="operation"><div class="block-name"><span class="block-circle">2</span> OPERATION <small>What happened?</small></div><code>{{s.operation}}</code></div>
+          <div class="transform-arrow">↓</div>
+          <div class="data-block after"><div class="block-name"><span class="block-circle">3</span> AFTER <small>What did we get?</small></div><pre>{{preview(s.after)}}</pre><button *ngIf="hasMore(s.after)" class="text-button" (click)="showMore=!showMore">{{showMore?'Show less':'Show all values'}}</button></div>
+          <div class="next-block"><div class="block-name"><span class="block-circle">4</span> NEXT <small>Where will it go?</small></div><p>{{s.next}}</p></div>
+          <ng-container *ngIf="journey==='question'&&stepIndex===3&&answer as a"><div class="rank-panel"><div class="section-label">WHY THESE CHUNKS RANKED HERE <span>actual cosine scores</span></div>
+            <button class="rank-row" *ngFor="let r of a.ranked.slice(0,10);let i=index" (click)="selectSource(r);showWhy=true"><span class="rank-number">{{i+1}}</span><span class="rank-name">{{r.filename}} · p{{r.page}}</span><div class="score-track"><div [style.width]="scoreWidth(r.score)"></div></div><strong>{{r.score.toFixed(3)}}</strong></button>
+            <div class="why" *ngIf="showWhy&&selectedSource as r"><strong>Why this score?</strong><p>Query vector vs this chunk vector → cosine similarity {{r.score.toFixed(6)}}. The system computes dot product divided by both vector lengths. This shows vector closeness, not which exact words caused it.</p><code>Chunk vector start: [{{r.vector_preview.join(', ')}}…]</code></div>
+          </div></ng-container>
+          <div *ngIf="journey==='question'&&showExperiment&&answer" class="experiment"><div class="section-label">⚡ WHAT IF? · TOP-K</div><label>Selected chunks: {{topK}} <input type="range" min="1" [max]="MathMin(10,answer.total_candidates)" [(ngModel)]="topK"></label>
+            <p>With Top-K = {{topK}}, these {{activeRanked.length}} chunks would be passed to the LLM:</p><div *ngFor="let r of activeRanked" class="experiment-item">✓ {{r.filename}} · p{{r.page}} · {{r.score.toFixed(3)}}</div>
+            <small>This preview reuses the saved ranking. Click Re-run to generate a new answer using the changed Top-K.</small><button class="primary small-button" (click)="ask()">Re-run with Top-K {{topK}}</button></div>
+        </div></ng-container>
+        <div class="journey-nav"><button (click)="step(-1)" [disabled]="stepIndex===0">← Previous</button><span>{{stepIndex+1}} / {{stages.length}}</span><button class="primary" (click)="step(1)">{{stepIndex===stages.length-1?'↺ Replay':'Next step →'}}</button></div>
+      </section>
+    </section>
+  </div>
+  <footer><span>RAG X-Ray · Real data, visible decisions</span><span>No event logs. No black-box scores.</span></footer>
+</div>

@@ -1,0 +1,13 @@
+Employee Handbook
+
+Annual Leave
+Employees can request annual leave through the HR portal. Open the Leave section, select the dates, provide a reason if needed, and submit the request. The manager reviews the request and approves or rejects it. Once approved, employees receive a notification.
+
+Password Reset
+Employees can reset their password using the Forgot Password link on the login page. A one-time link is sent to the registered email address.
+
+Payroll Schedule
+Payroll is processed on the last working day of each month. Employees can access payslips from the employee portal after payroll processing is complete.
+
+Technology Training
+Python is commonly used for AI and machine learning. Angular is a frontend framework used for interactive web applications.

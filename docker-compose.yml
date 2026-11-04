@@ -1,0 +1,16 @@
+services:
+  api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - model_cache:/root/.cache/huggingface
+    environment:
+      OLLAMA_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: qwen2.5-coder:7b
+      CORS_ORIGINS: http://localhost:4200
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+volumes:
+  model_cache:
