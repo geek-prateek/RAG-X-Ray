@@ -183,24 +183,176 @@ def cosines(query_vector: np.ndarray, matrix: np.ndarray) -> np.ndarray:
     return scores
 
 
-def ollama_answer(question: str, contexts: list[dict]) -> tuple[str, str]:
-    """
-    Sends the user's question and retrieved context chunks to Ollama
-    to generate a grounded, ChatGPT-style structured answer with citations [1], [2].
+def _clean_llm_response(answer: str, question: str) -> str:
+    """Removes echoed user question if present on the first line of the answer."""
+    lines = answer.splitlines()
+    if lines:
+        first_clean = re.sub(r'\[\d+\]', '', lines[0]).strip().rstrip('?.:').lower()
+        if first_clean == question.strip().rstrip('?.:').lower():
+            return '\n'.join(lines[1:]).strip()
+    return answer.strip()
 
-    If Ollama is down, returns clearly labeled extractive excerpts as a fallback.
+
+def call_groq(system_prompt: str, user_prompt: str, model: str | None = None, api_key: str | None = None) -> tuple[str, str]:
+    """Calls Groq Cloud API for ultra-fast Llama-3.3 / Mixtral inference."""
+    chosen_model = (model or os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile')).strip()
+    key = api_key or os.getenv('GROQ_API_KEY')
+    if not key:
+        raise ValueError('Groq API Key is missing. Please click the model settings ⚙ in the chat bar to enter your Groq API key.')
+
+    headers = {
+        'Authorization': f'Bearer {key.strip()}',
+        'Content-Type': 'application/json'
+    }
+    payload = {
+        'model': chosen_model,
+        'messages': [
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': user_prompt}
+        ],
+        'temperature': 0.2
+    }
+    resp = requests.post('https://api.groq.com/openai/v1/chat/completions', headers=headers, json=payload, timeout=60)
+    if resp.status_code != 200:
+        error_detail = resp.json().get('error', {}).get('message', resp.text)
+        raise ValueError(f'Groq API error ({resp.status_code}): {error_detail}')
+    content = resp.json()['choices'][0]['message']['content']
+    return content, chosen_model
+
+
+def call_openai(system_prompt: str, user_prompt: str, model: str | None = None, api_key: str | None = None) -> tuple[str, str]:
+    """Calls OpenAI API for GPT-4o-mini / GPT-4o inference."""
+    chosen_model = (model or os.getenv('OPENAI_MODEL', 'gpt-4o-mini')).strip()
+    key = api_key or os.getenv('OPENAI_API_KEY')
+    if not key:
+        raise ValueError('OpenAI API Key is missing. Please click the model settings ⚙ in the chat bar to enter your OpenAI API key.')
+
+    headers = {
+        'Authorization': f'Bearer {key.strip()}',
+        'Content-Type': 'application/json'
+    }
+    payload = {
+        'model': chosen_model,
+        'messages': [
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': user_prompt}
+        ],
+        'temperature': 0.2
+    }
+    resp = requests.post('https://api.openai.com/v1/chat/completions', headers=headers, json=payload, timeout=60)
+    if resp.status_code != 200:
+        error_detail = resp.json().get('error', {}).get('message', resp.text)
+        raise ValueError(f'OpenAI API error ({resp.status_code}): {error_detail}')
+    content = resp.json()['choices'][0]['message']['content']
+    return content, chosen_model
+
+
+def call_gemini(system_prompt: str, user_prompt: str, model: str | None = None, api_key: str | None = None) -> tuple[str, str]:
+    """Calls Google Gemini API for Gemini-1.5-Flash / Gemini-1.5-Pro inference."""
+    raw_model = (model or os.getenv('GEMINI_MODEL', 'gemini-1.5-flash')).strip()
+    chosen_model = raw_model.replace('models/', '').strip()
+    key = api_key or os.getenv('GEMINI_API_KEY')
+    if not key:
+        raise ValueError('Google Gemini API Key is missing. Please click the model settings ⚙ in the chat bar to enter your Gemini API key.')
+
+    url = f'https://generativelanguage.googleapis.com/v1beta/models/{chosen_model}:generateContent?key={key.strip()}'
+    payload = {
+        'system_instruction': {
+            'parts': [{'text': system_prompt}]
+        },
+        'contents': [
+            {
+                'role': 'user',
+                'parts': [{'text': user_prompt}]
+            }
+        ],
+        'generationConfig': {
+            'temperature': 0.2
+        }
+    }
+    resp = requests.post(url, json=payload, timeout=60)
+    if resp.status_code != 200:
+        error_detail = resp.json().get('error', {}).get('message', resp.text)
+        raise ValueError(f'Gemini API error ({resp.status_code}): {error_detail}')
+    candidates = resp.json().get('candidates', [])
+    if not candidates:
+        raise ValueError('Gemini returned no response candidates.')
+    parts = candidates[0].get('content', {}).get('parts', [])
+    content = parts[0].get('text', '') if parts else ''
+    return content, chosen_model
+
+
+def call_ollama(system_prompt: str, user_prompt: str, model: str | None = None) -> tuple[str, str]:
+    """Calls local Ollama API."""
+    chosen_model = model or os.getenv('OLLAMA_MODEL', 'qwen2.5-coder:7b')
+    base_url = os.getenv('OLLAMA_URL', 'http://localhost:11434').rstrip('/')
+
+    # 1. Try /api/chat
+    chat_endpoint = f"{base_url}/api/chat"
+    payload = {
+        "model": chosen_model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        "stream": False,
+        "options": {"temperature": 0.2}
+    }
+    try:
+        resp = requests.post(chat_endpoint, json=payload, timeout=75)
+        if resp.status_code == 200:
+            content = resp.json().get('message', {}).get('content', '').strip()
+            if content:
+                return content, chosen_model
+    except Exception:
+        pass
+
+    # 2. Try /api/generate
+    gen_endpoint = f"{base_url}/api/generate"
+    combined_prompt = f"{system_prompt}\n\n{user_prompt}"
+    resp = requests.post(
+        gen_endpoint,
+        json={"model": chosen_model, "prompt": combined_prompt, "stream": False, "options": {"temperature": 0.2}},
+        timeout=75
+    )
+    if resp.status_code == 200:
+        content = resp.json().get('response', '').strip()
+        if content:
+            return content, chosen_model
+
+    raise ValueError(f"Could not connect to local Ollama at {base_url} with model '{chosen_model}'. Make sure Ollama is running, or switch AI engine to Groq or Gemini in settings.")
+
+
+def generate_llm_answer(
+    question: str,
+    contexts: list[dict],
+    provider: str = 'ollama',
+    model: str | None = None,
+    api_key: str | None = None
+) -> tuple[str, str, str]:
     """
+    Unified multi-provider LLM answer generator:
+    Supports: 'ollama' (local), 'groq' (cloud), 'openai' (cloud), 'gemini' (cloud).
+    Returns: (answer_text, actual_model_name, provider_name)
+    """
+    default_model_map = {
+        'groq': os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile'),
+        'gemini': os.getenv('GEMINI_MODEL', 'gemini-1.5-flash'),
+        'openai': os.getenv('OPENAI_MODEL', 'gpt-4o-mini'),
+        'ollama': os.getenv('OLLAMA_MODEL', 'qwen2.5-coder:7b')
+    }
+    provider_clean = (provider or 'ollama').lower().strip()
+    active_requested_model = (model or default_model_map.get(provider_clean, 'qwen2.5-coder:7b')).strip()
+
     if not contexts:
-        return "I couldn't find supporting evidence in the uploaded documents.", "no_evidence"
+        return "I couldn't find supporting evidence in the uploaded documents.", active_requested_model, "no_evidence"
 
-    # Format the retrieved chunks with citation numbers [1], [2], etc.
+    # Format retrieved chunks with citation numbers [1], [2], etc.
     formatted_contexts = []
     for index, chunk in enumerate(contexts):
-        citation_number = index + 1
-        formatted_contexts.append(f"[{citation_number}] {chunk['text']}")
+        formatted_contexts.append(f"[{index + 1}] {chunk['text']}")
     evidence_text = '\n\n'.join(formatted_contexts)
 
-    # Clear instructions to produce structured, ChatGPT-style output
     system_prompt = (
         "You are an expert AI assistant like ChatGPT.\n"
         "Your task is to answer the user's question clearly, thoroughly, and professionally based strictly on the provided EVIDENCE.\n\n"
@@ -214,67 +366,50 @@ def ollama_answer(question: str, contexts: list[dict]) -> tuple[str, str]:
     )
     user_prompt = f"EVIDENCE:\n{evidence_text}\n\nQUESTION:\n{question}"
 
-    model = os.getenv('OLLAMA_MODEL', 'qwen2.5-coder:7b')
-    base_url = os.getenv('OLLAMA_URL', 'http://localhost:11434').rstrip('/')
-
-    # 1. Try Ollama's conversational /api/chat endpoint first
     try:
-        chat_endpoint = f"{base_url}/api/chat"
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            "stream": False,
-            "options": {"temperature": 0.2}
-        }
-        response = requests.post(chat_endpoint, json=payload, timeout=75)
-        if response.status_code == 200:
-            answer = response.json().get('message', {}).get('content', '').strip()
-            if answer:
-                # Remove question if the model accidentally repeated it on the first line
-                lines = answer.splitlines()
-                if lines:
-                    first_clean = re.sub(r'\[\d+\]', '', lines[0]).strip().rstrip('?.:').lower()
-                    if first_clean == question.strip().rstrip('?.:').lower():
-                        answer = '\n'.join(lines[1:]).strip()
-                return answer, f"ollama:{model}"
-    except (requests.RequestException, ValueError):
-        pass
+        if provider_clean == 'groq':
+            raw_answer, active_model = call_groq(system_prompt, user_prompt, model, api_key)
+            cleaned = _clean_llm_response(raw_answer, question)
+            return cleaned, active_model, 'groq'
+        elif provider_clean == 'openai':
+            raw_answer, active_model = call_openai(system_prompt, user_prompt, model, api_key)
+            cleaned = _clean_llm_response(raw_answer, question)
+            return cleaned, active_model, 'openai'
+        elif provider_clean == 'gemini':
+            raw_answer, active_model = call_gemini(system_prompt, user_prompt, model, api_key)
+            cleaned = _clean_llm_response(raw_answer, question)
+            return cleaned, active_model, 'gemini'
+        else:
+            raw_answer, active_model = call_ollama(system_prompt, user_prompt, model)
+            cleaned = _clean_llm_response(raw_answer, question)
+            return cleaned, active_model, 'ollama'
+    except Exception as exc:
+        excerpts = []
+        for index, chunk in enumerate(contexts):
+            first_sentence = re.split(r'(?<=[.!?])\s+', chunk['text'])[0]
+            excerpts.append(f"{excerpt(first_sentence, 260)} [{index + 1}]")
 
-    # 2. Fallback to /api/generate if /api/chat is not supported
-    try:
-        gen_endpoint = f"{base_url}/api/generate"
-        combined_prompt = f"{system_prompt}\n\n{user_prompt}"
-        response = requests.post(
-            gen_endpoint,
-            json={"model": model, "prompt": combined_prompt, "stream": False, "options": {"temperature": 0.2}},
-            timeout=75
+        prov_display = {
+            'groq': 'Groq Cloud',
+            'gemini': 'Google Gemini',
+            'openai': 'OpenAI',
+            'ollama': 'Local Ollama'
+        }.get(provider_clean, provider_clean.title())
+
+        fallback_msg = (
+            f"**Notice ({prov_display}):** {str(exc)}\n\n"
+            "**Retrieved source evidence passages:**\n\n"
+            + '\n\n'.join(excerpts)
         )
-        if response.status_code == 200:
-            answer = response.json().get('response', '').strip()
-            if answer:
-                lines = answer.splitlines()
-                if lines:
-                    first_clean = re.sub(r'\[\d+\]', '', lines[0]).strip().rstrip('?.:').lower()
-                    if first_clean == question.strip().rstrip('?.:').lower():
-                        answer = '\n'.join(lines[1:]).strip()
-                return answer, f"ollama:{model}"
-    except (requests.RequestException, ValueError):
-        pass
+        return fallback_msg, active_requested_model, "extractive_fallback"
 
-    # 3. Safe fallback if Ollama is unavailable: extract the first sentence from each chunk
-    excerpts = []
-    for index, chunk in enumerate(contexts):
-        first_sentence = re.split(r'(?<=[.!?])\s+', chunk['text'])[0]
-        excerpts.append(f"{excerpt(first_sentence, 260)} [{index + 1}]")
 
-    fallback_message = (
-        "Ollama unavailable. Here are the closest source excerpts (not AI-generated):\n"
-        + '\n'.join(excerpts)
-    )
-    return fallback_message, "extractive_fallback"
+def ollama_answer(question: str, contexts: list[dict], model: str | None = None) -> tuple[str, str]:
+    """
+    Backward-compatible wrapper for existing tests and callers.
+    """
+    answer, active_model, provider = generate_llm_answer(question, contexts, provider='ollama', model=model)
+    return answer, f"{provider}:{active_model}"
 
 
 def sha256(content: bytes) -> str:

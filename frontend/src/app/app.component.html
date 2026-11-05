@@ -1,85 +1,825 @@
-<div class="app-shell">
-  <header class="topbar">
-    <button class="brand" (click)="reset()"><span class="brand-icon">✳</span><span>RAG <strong>X-Ray</strong></span></button>
-    <div class="header-right"><span class="tag">Learn by seeing the data</span><span class="online"><span></span> Local project</span></div>
-  </header>
-  <div class="error" *ngIf="error">{{error}} <button (click)="error=''">×</button></div>
-  <main class="landing" *ngIf="!docs.length">
-    <span class="hero-glyph">✦</span><div class="eyebrow">INTERACTIVE RAG PLAYGROUND</div>
-    <h1>Don't just ask AI.<br><em>See how it finds answers.</em></h1>
-    <p>Upload a document. Follow each transformation. Explore real embeddings, ranking and evidence — without technical clutter.</p>
-    <label class="drop-zone" (dragover)="$event.preventDefault()" (drop)="onDrop($event)">
-      <span class="upload-icon">⇧</span><strong>Drop your document here</strong>
-      <small>PDF, TXT or Markdown · Up to 10 MB</small><span class="primary-button">Choose documents</span>
-      <input type="file" multiple accept=".pdf,.txt,.md" (change)="uploadFiles($any($event.target).files);$any($event.target).value=''" hidden>
-    </label>
-    <div class="hint">Start with <strong>sample_docs/employee_handbook.txt</strong> included in the ZIP.</div>
-  </main>
-  <div class="workspace" *ngIf="docs.length">
-    <aside class="sidebar">
-      <div class="side-section"><div class="side-heading"><span>YOUR LIBRARY</span><span class="count">{{docs.length}}</span></div>
-        <div class="doc-row" *ngFor="let d of docs" [class.selected]="currentDoc?.id===d.id">
-          <input type="checkbox" [checked]="selectedIds.has(d.id)" (change)="toggleDoc(d.id,$any($event.target).checked)" [disabled]="d.status!=='ready'" [attr.aria-label]="'Use '+d.filename">
-          <span class="doc-icon">▤</span>
-          <button class="doc-label" (click)="loadDoc(d.id,true)" [title]="d.filename"><strong>{{d.filename}}</strong><small [class.ready]="d.status==='ready'">{{d.status==='ready'?'✓ Searchable':d.status==='failed'?'✕ Failed':(d.stage_count||0)+'/6 steps completed'}}</small></button>
-          <button class="icon-button" (click)="removeDoc(d)" title="Delete document">×</button>
+<div class="app-shell" (click)="showWorkspaceDropdown = false">
+
+  <!-- ═══════════════════════════════ TOPBAR ═══════════════════════════════ -->
+  <header class="topbar" (click)="$event.stopPropagation()">
+    <button class="brand" (click)="reset()" aria-label="Go to home">
+      <span class="brand-icon">✳</span>
+      <span class="brand-name"><span class="brand-prefix">RAG </span><strong>X-Ray</strong></span>
+    </button>
+
+    <div class="header-right">
+      <button class="model-badge-btn" (click)="showModelSettings = true"
+        title="Configure AI Provider & Model">
+        <span class="mb-icon">{{ getProviderIcon(selectedProvider) }}</span>
+        <span class="mb-name">{{ customModel }}</span>
+        <span class="mb-status" [class.missing]="!hasApiKeyForProvider(selectedProvider)">
+          {{ selectedProvider === 'ollama' ? 'Local' : (hasApiKeyForProvider(selectedProvider) ? 'Ready' : 'Key needed') }}
+        </span>
+        <span class="mb-gear">⚙</span>
+      </button>
+
+      <div class="ws-wrap">
+        <button class="ws-btn" (click)="showWorkspaceDropdown = !showWorkspaceDropdown"
+          title="Switch workspace">
+          <span class="ws-icon">📂</span>
+          <span class="ws-name">{{ currentWorkspaceName }}</span>
+          <span class="ws-latest-pill" *ngIf="isCurrentWorkspaceLatest" title="Active: Latest workspace">Latest</span>
+          <span class="ws-arr">▾</span>
+        </button>
+        <div class="ws-menu" *ngIf="showWorkspaceDropdown">
+          <div class="ws-menu-head">
+            <span class="ws-menu-label">YOUR WORKSPACES</span>
+            <span class="ws-menu-count" *ngIf="workspaces.length">{{ workspaces.length }} saved</span>
+          </div>
+          <div class="ws-menu-list">
+            <div class="ws-empty" *ngIf="!workspaces.length">
+              No saved workspaces.<br><small>Upload a document to create one.</small>
+            </div>
+            <button class="ws-item" *ngFor="let ws of workspaces"
+              (click)="switchWorkspace(ws); mobileTab='main'"
+              [class.active]="ws.id === sessionId"
+              [class.latest]="ws.is_latest"
+              [title]="ws.name + (ws.last_active ? ' · Active: ' + ws.last_active : '')">
+              <div class="ws-item-body">
+                <div class="ws-item-top">
+                  <span class="ws-item-name">{{ cleanWorkspaceName(ws.name) }}</span>
+                  <span class="ws-badge-latest" *ngIf="ws.is_latest">✨ Latest</span>
+                </div>
+                <div class="ws-item-sub">
+                  <span class="ws-item-meta">{{ ws.doc_count }} docs · {{ ws.history_count }} queries</span>
+                  <span class="ws-item-time" *ngIf="ws.time_ago">· {{ ws.time_ago }}</span>
+                </div>
+              </div>
+              <div class="ws-item-actions">
+                <span class="ws-item-check" *ngIf="ws.id === sessionId" title="Current workspace">✓</span>
+                <button *ngIf="ws.id !== 'default' && ws.id !== sessionId"
+                  class="ws-item-del" (click)="deleteWorkspace(ws, $event)" title="Delete workspace">×</button>
+              </div>
+            </button>
+          </div>
+          <div class="ws-menu-sep"></div>
+          <button class="ws-new-btn" (click)="createNewWorkspace()">+ New Workspace</button>
         </div>
-        <label class="add-document">+ Add document<input type="file" multiple accept=".pdf,.txt,.md" (change)="uploadFiles($any($event.target).files);$any($event.target).value=''" hidden></label>
       </div>
-      <div class="chat-group"><div class="chat-title">✦ ASK YOUR KNOWLEDGE</div>
-        <div class="chat-empty" *ngIf="!answer"><span class="chat-star">✳</span><p>Ask anything about your selected documents.</p><span class="subtle">The answer will include source evidence.</span></div>
-        <div class="history" *ngIf="answer"><span class="question-bubble">{{question}}</span><span class="answer-bubble">Answer ready! Explore the details →</span></div>
+    </div>
+  </header>
+
+  <!-- Error banner -->
+  <div class="error-bar" *ngIf="error">
+    <span>{{ error }}</span>
+    <button (click)="error = ''">×</button>
+  </div>
+
+  <!-- ═══════════════════════════════ LANDING ═══════════════════════════════ -->
+  <main class="landing" *ngIf="!docs.length">
+    <div class="landing-inner">
+      <div class="landing-hero-icon">✦</div>
+      <div class="landing-eyebrow">INTERACTIVE RAG PLAYGROUND</div>
+      <h1 class="landing-title">
+        Don't just ask AI.<br>
+        <em>See how it finds answers.</em>
+      </h1>
+      <p class="landing-desc">
+        Upload any document. Watch every transformation live — embeddings, cosine similarity,
+        vector ranking, and grounded citations.
+      </p>
+
+      <div class="sample-card">
+        <div class="sample-card-left">
+          <span class="sample-badge">⚡ 1-Click Demo</span>
+          <strong class="sample-title">Employee Handbook</strong>
+          <span class="sample-file">sample_docs/employee_handbook.txt</span>
+        </div>
+        <button type="button" class="btn-primary" (click)="loadSampleDoc()"
+          [disabled]="uploadingSample">
+          {{ uploadingSample ? '⏳ Indexing…' : '📄 Load & Start' }}
+        </button>
       </div>
-      <div class="composer"><textarea [(ngModel)]="question" rows="2" placeholder="Ask a question…" (keydown.control.enter)="ask()"></textarea>
-        <div class="composer-bottom"><span>{{chosenDocs.length}} selected · Ctrl + Enter</span><button class="send" (click)="ask()" [disabled]="busy||!chosenDocs.length||!question.trim()">{{busy?'Thinking…':'Ask →'}}</button></div>
+
+      <!-- Upload Drop Zone (Direct native file picker activation) -->
+      <div class="or-row"><span>OR UPLOAD YOUR OWN</span></div>
+      <div class="drop-zone"
+        (dragover)="$event.preventDefault()"
+        (drop)="onDrop($event)"
+        (click)="triggerFilePicker($event)">
+        <span class="dz-icon">⇧</span>
+        <strong>Drop document here</strong>
+        <small>PDF, TXT or Markdown · Up to 50 MB · 100% Private</small>
+        <button type="button" class="btn-outline" (click)="triggerFilePicker($event)">
+          {{ uploading ? '⏳ Uploading & Indexing…' : 'Choose file' }}
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ═══════════════════════════ WORKSPACE ═══════════════════════════ -->
+  <div class="workspace" *ngIf="docs.length">
+
+    <!-- Sidebar -->
+    <aside class="sidebar" [class.sidebar-open]="mobileTab === 'sidebar'">
+
+      <button type="button" class="new-chat-btn" (click)="reset(); mobileTab = 'main'"
+        title="Clear current answer and start a new question">
+        <span class="new-chat-icon">＋</span>
+        <span>New Chat</span>
+      </button>
+
+      <div class="side-block">
+        <div class="side-block-head">
+          <span class="side-block-label">YOUR LIBRARY</span>
+          <span class="side-block-count">{{ docs.length }}</span>
+        </div>
+        <div class="doc-list">
+          <div class="doc-row" *ngFor="let d of docs"
+            [class.doc-row-active]="currentDoc?.id === d.id">
+            <input type="checkbox" [checked]="selectedIds.has(d.id)"
+              (change)="toggleDoc(d.id, $any($event.target).checked)"
+              [disabled]="d.status !== 'ready'"
+              [attr.aria-label]="'Use ' + d.filename">
+            <button class="doc-name-btn"
+              (click)="loadDoc(d.id, true); mobileTab = 'main'" [title]="d.filename">
+              <span class="doc-fname">{{ d.filename }}</span>
+              <span class="doc-status" [class.ready]="d.status === 'ready'">
+                {{ d.status === 'ready' ? '✓ Ready' : d.status === 'failed' ? '✕ Failed' : (d.stage_count || 0) + '/6 stages' }}
+              </span>
+            </button>
+            <button class="doc-del-btn" (click)="removeDoc(d)" title="Delete">×</button>
+          </div>
+        </div>
+        <button type="button" class="add-doc-link" (click)="triggerFilePicker($event)" [disabled]="uploading">
+          {{ uploading ? '⏳ Indexing…' : '+ Add document' }}
+        </button>
+      </div>
+
+      <div class="side-block side-history" *ngIf="historyList.length">
+        <div class="side-block-head">
+          <span class="side-block-label">RECENT QUERIES</span>
+          <button class="clear-btn" (click)="clearHistory()">Clear</button>
+        </div>
+        <div class="history-list">
+          <button class="hist-item" *ngFor="let h of historyList"
+            (click)="selectHistoryItem(h); mobileTab = 'main'"
+            [class.active]="answer?.id === h.id">
+            <span class="hist-q">{{ h.question }}</span>
+            <span class="hist-meta">{{ h.sources.length }} citations · {{ h.model || 'LLM' }}</span>
+          </button>
+        </div>
       </div>
     </aside>
+
+    <!-- Sidebar mobile backdrop -->
+    <div class="sidebar-backdrop" *ngIf="mobileTab === 'sidebar'"
+      (click)="mobileTab = 'main'"></div>
+
+    <!-- Main Panel -->
     <section class="main-panel">
       <div class="main-scroll">
-        <ng-container *ngIf="!answer">
-          <div class="workspace-head"><div><div class="eyebrow">YOUR WORKSPACE</div><h2>Knowledge, made visible.</h2><p>Every document has a story. Click to follow its data.</p></div><span class="sparkle">✳</span></div>
-          <div class="feature-grid"><div class="feature"><span>▤</span><strong>{{docs.length}}</strong><small>Documents</small></div><div class="feature"><span>◈</span><strong>{{ready.length}}</strong><small>Ready to ask</small></div></div>
-          <div class="document-card" *ngIf="currentDoc as d">
-            <div class="document-top"><span class="document-illustration">▤</span><div class="grow"><strong>{{d.filename}}</strong><small>{{d.status==='ready'?'Ready to search':d.status==='failed'?'Indexing failed':'Preparing searchable knowledge…'}}</small></div><span class="status" [class.success]="d.status==='ready'">{{d.status}}</span></div>
-            <div class="progress" *ngIf="d.status==='processing'||d.status==='queued'"><div [style.width.%]="stageProgress"></div></div>
-            <p class="warning" *ngIf="d.error">{{d.error}}</p>
-            <button class="explore-btn" (click)="openJourney('document')">✦ Explore Document Journey <span>→</span></button>
+
+        <!-- IDLE STATE -->
+        <ng-container *ngIf="!answer && !busy && !activeQuestion">
+          <div class="idle-head">
+            <div>
+              <div class="eyebrow">RAG PIPELINE EXPLORER</div>
+              <h2>Knowledge, made visible.</h2>
+              <p>Ask a question below to trace how vectors are created, scored, ranked, and cited.</p>
+            </div>
+            <span class="sparkle">✳</span>
           </div>
-          <div class="empty-prompt" *ngIf="!currentDoc"><span>↑</span> Select a document to explore its journey.</div>
-        </ng-container>
-        <ng-container *ngIf="answer as a">
-          <div class="answer-heading"><div><div class="eyebrow">AI ANSWER</div><h2>Here's what I found.</h2></div><span class="status success">{{a.answer_mode.startsWith('ollama')?'AI generated': 'Source excerpts'}}</span></div>
-          <div class="answer-text markdown-body" [innerHTML]="renderMarkdown(a.answer)"></div>
-          <div class="source-section"><div class="section-label">SOURCE EVIDENCE <span>{{a.sources.length}} chunks</span></div>
-            <button class="source-row" *ngFor="let s of a.sources;let i=index" (click)="selectSource(s)" [class.active]="selectedSource?.id===s.id"><span class="source-number">{{i+1}}</span><span class="grow"><strong>{{s.filename}}</strong><small>Page {{s.page}} · cosine similarity {{s.score.toFixed(3)}}</small></span><span>↗</span></button>
-            <div class="highlight-panel" *ngIf="selectedSource as s"><div class="section-label">SUPPORTING PASSAGE · {{s.filename}}, PAGE {{s.page}}</div><div class="highlight-text">{{s.text}}</div><small>Actual indexed chunk text. Highlighting shows the cited passage, not a proof of claim-level entailment.</small></div>
+
+          <div class="doc-card" *ngIf="currentDoc as d">
+            <div class="doc-card-top">
+              <span class="doc-card-icon">▤</span>
+              <div class="doc-card-info">
+                <strong>{{ d.filename }}</strong>
+                <small>{{ d.status === 'ready' ? 'Indexed & ready to query' : d.status === 'failed' ? 'Indexing failed' : 'Preparing searchable knowledge…' }}</small>
+              </div>
+              <span class="status-pill" [class.ready]="d.status === 'ready'">
+                {{ d.status === 'ready' ? 'READY' : d.status.toUpperCase() }}
+              </span>
+            </div>
+            <div class="doc-progress" *ngIf="d.status === 'processing' || d.status === 'queued'">
+              <div [style.width.%]="stageProgress"></div>
+            </div>
+            <p class="doc-error" *ngIf="d.error">{{ d.error }}</p>
+            <button class="explore-btn" (click)="openJourney('document')">
+              ✦ Explore 6 Document Processing Stages →
+            </button>
           </div>
-          <button class="explore-btn" (click)="openJourney('question')">✦ Explore Question Journey <span>→</span></button>
-          <button class="experiment-link" (click)="compareDoc()">⚡ What if I change Top-K?</button>
+
+          <div class="empty-state" *ngIf="!currentDoc">
+            Select a document from your library or upload one to begin.
+          </div>
         </ng-container>
+
+        <!-- ANALYSIS VIEW -->
+        <div class="analysis-view" *ngIf="activeQuestion || busy || answer">
+
+          <div class="query-chip" *ngIf="activeQuestion">
+            <span class="query-chip-label">YOUR QUESTION</span>
+            <p class="query-chip-text">"{{ activeQuestion }}"</p>
+            <span class="query-chip-scope">{{ chosenDocs.length }} doc(s) in scope</span>
+          </div>
+
+          <!-- Live pipeline thinking -->
+          <div class="thinking-card" *ngIf="busy">
+            <div class="thinking-header">
+              <div class="thinking-title">
+                <span class="thinking-spinner"></span>
+                <strong>Tracing RAG Pipeline…</strong>
+              </div>
+              <span class="thinking-timer">{{ thinkingSeconds.toFixed(1) }}s</span>
+            </div>
+            <div class="pipeline-steps">
+              <div class="pipe-step"
+                [class.done]="thinkingStep > 1" [class.active]="thinkingStep === 1">
+                <span class="pipe-num">{{ thinkingStep > 1 ? '✓' : '1' }}</span>
+                <div class="pipe-info"><strong>Your Question</strong><small>Captured & tokenized</small></div>
+              </div>
+              <div class="pipe-step"
+                [class.done]="thinkingStep > 2" [class.active]="thinkingStep === 2">
+                <span class="pipe-num">{{ thinkingStep > 2 ? '✓' : '2' }}</span>
+                <div class="pipe-info"><strong>Query Embedding</strong><small>384-dim dense vector</small></div>
+              </div>
+              <div class="pipe-step"
+                [class.done]="thinkingStep > 3" [class.active]="thinkingStep === 3">
+                <span class="pipe-num">{{ thinkingStep > 3 ? '✓' : '3' }}</span>
+                <div class="pipe-info"><strong>Vector Comparison</strong><small>Cosine similarity (ChromaDB)</small></div>
+              </div>
+              <div class="pipe-step"
+                [class.done]="thinkingStep > 4" [class.active]="thinkingStep === 4">
+                <span class="pipe-num">{{ thinkingStep > 4 ? '✓' : '4' }}</span>
+                <div class="pipe-info"><strong>Rank & Retrieve</strong><small>Top-{{ topK }} chunks selected</small></div>
+              </div>
+              <div class="pipe-step"
+                [class.done]="thinkingStep > 5" [class.active]="thinkingStep === 5">
+                <span class="pipe-num">{{ thinkingStep > 5 ? '✓' : '5' }}</span>
+                <div class="pipe-info"><strong>Generate Answer</strong><small>{{ customModel }} synthesis</small></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Answer card -->
+          <div class="answer-card" *ngIf="answer as a">
+            <div class="answer-card-head">
+              <div class="answer-ai-id">
+                <span class="ai-avatar">✳</span>
+                <strong>Grounded AI Answer</strong>
+              </div>
+              <span class="answer-model-badge" [class.fallback]="a.answer_mode === 'extractive_fallback'">
+                <ng-container *ngIf="a.answer_mode === 'extractive_fallback'">
+                  ⚠ Extractive Fallback · {{ a.model || customModel }}
+                </ng-container>
+                <ng-container *ngIf="a.answer_mode !== 'extractive_fallback'">
+                  {{ getProviderIcon(a.provider || selectedProvider) }}
+                  {{ a.model || customModel }} · {{ getProviderName(a.provider || selectedProvider) }}
+                </ng-container>
+              </span>
+            </div>
+
+            <button class="thought-toggle" (click)="showThoughtProcess = !showThoughtProcess">
+              <span class="thought-icon">✦</span>
+              <span class="thought-label">Thought for {{ a.thinking_time || '1.4' }}s · 5 pipeline steps</span>
+              <span class="thought-caret">{{ showThoughtProcess ? '▴' : '▾' }}</span>
+            </button>
+
+            <div class="thought-steps" *ngIf="showThoughtProcess">
+              <div class="thought-step" *ngFor="let st of a.steps; let idx = index">
+                <div class="thought-step-head">
+                  <span class="thought-step-num">Step {{ idx + 1 }}</span>
+                  <strong>{{ st.name }}</strong>
+                </div>
+                <div class="thought-step-body">{{ st.summary || st.operation }}</div>
+                <code class="thought-step-code"
+                  *ngIf="st.operation && st.operation !== st.summary">{{ st.operation }}</code>
+              </div>
+            </div>
+
+            <div class="answer-text" [innerHTML]="renderMarkdown(a.answer)"></div>
+
+            <!-- ══ CORE USP: Source Evidence & Cosine Scores ══ -->
+            <div class="sources-section">
+              <div class="sources-header">
+                <div>
+                  <span class="sources-eyebrow">CORE RAG MATH ENGINE</span>
+                  <h4 class="sources-title">Source Evidence & Cosine Similarity</h4>
+                  <p class="sources-desc">Ranked by vector dot product — click any card to inspect the passage.</p>
+                </div>
+                <span class="sources-count">{{ a.sources.length }} chunks cited</span>
+              </div>
+
+              <div class="source-cards">
+                <div class="source-card" *ngFor="let s of a.sources; let i = index"
+                  (click)="selectSource(s)"
+                  [class.selected]="selectedSource?.id === s.id">
+
+                  <div class="source-card-top">
+                    <span class="source-rank">#{{ i + 1 }} Match</span>
+                    <span class="source-file">{{ s.filename }}</span>
+                  </div>
+
+                  <div class="cosine-block">
+                    <div class="cosine-label-row">
+                      <span class="cosine-label">COSINE SIMILARITY</span>
+                      <strong class="cosine-score">{{ s.score.toFixed(4) }}</strong>
+                    </div>
+                    <div class="cosine-bar-track">
+                      <div class="cosine-bar-fill" [style.width]="(s.score * 100) + '%'"></div>
+                    </div>
+                    <span class="cosine-pct">{{ (s.score * 100).toFixed(1) }}% semantic match</span>
+                  </div>
+
+                  <p class="source-snippet">"{{ s.text.slice(0, 150) }}…"</p>
+                  <span class="source-inspect-hint">
+                    {{ selectedSource?.id === s.id ? '✓ Inspecting below' : 'Click to inspect →' }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- Passage inspection -->
+              <div class="passage-panel" *ngIf="selectedSource as s">
+                <div class="passage-panel-head">
+                  <strong>PASSAGE INSPECTION · {{ s.filename }}</strong>
+                  <span class="passage-score-badge">Cosine: {{ s.score.toFixed(6) }}</span>
+                </div>
+                <div class="passage-text">{{ s.text }}</div>
+                <div class="passage-formula">
+                  <strong>Vector Math:</strong>
+                  Cosine Similarity =
+                  <code>(Query·Chunk) / (‖Query‖ × ‖Chunk‖)</code>
+                  = <strong>{{ s.score.toFixed(6) }}</strong>
+                  <span class="formula-note">(Unit-normalized → equals pure dot product)</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="answer-actions">
+              <button class="explore-btn" (click)="openJourney('question')">
+                ✦ Explore 5-Step Question Journey →
+              </button>
+              <button class="experiment-btn" (click)="compareDoc()">
+                ⚡ Experiment: Change Top-K
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
-      <section class="journey" *ngIf="journey">
-        <div class="journey-head"><div><div class="eyebrow">DATA JOURNEY</div><h3>{{journey==='document'?'From file to knowledge':'From question to answer'}}</h3><p>Follow the values. Understand every transformation.</p></div><button class="close" (click)="journey=null" title="Close">×</button></div>
-        <div class="steps"><button *ngFor="let stage of stages;let i=index" (click)="chooseStep(i)" [class.active]="stepIndex===i"><span>{{i+1}}</span>{{stage.name}}</button></div>
-        <ng-container *ngIf="currentStep as s"><div class="journey-card" [class.flash]="visualPulse">
-          <div class="step-heading"><span class="step-number">STEP {{stepIndex+1}} OF {{stages.length}}</span><h3>{{s.name}}</h3></div>
-          <div class="data-block"><div class="block-name"><span class="block-circle">1</span> BEFORE <small>What did we have?</small></div><pre>{{preview(s.before)}}</pre><button *ngIf="hasMore(s.before)" class="text-button" (click)="showMore=!showMore">{{showMore?'Show less':'Show all values'}}</button></div>
-          <div class="transform-arrow">↓</div>
-          <div class="operation"><div class="block-name"><span class="block-circle">2</span> OPERATION <small>What happened?</small></div><code>{{s.operation}}</code></div>
-          <div class="transform-arrow">↓</div>
-          <div class="data-block after"><div class="block-name"><span class="block-circle">3</span> AFTER <small>What did we get?</small></div><pre>{{preview(s.after)}}</pre><button *ngIf="hasMore(s.after)" class="text-button" (click)="showMore=!showMore">{{showMore?'Show less':'Show all values'}}</button></div>
-          <div class="next-block"><div class="block-name"><span class="block-circle">4</span> NEXT <small>Where will it go?</small></div><p>{{s.next}}</p></div>
-          <ng-container *ngIf="journey==='question'&&stepIndex===3&&answer as a"><div class="rank-panel"><div class="section-label">WHY THESE CHUNKS RANKED HERE <span>actual cosine scores</span></div>
-            <button class="rank-row" *ngFor="let r of a.ranked.slice(0,10);let i=index" (click)="selectSource(r);showWhy=true"><span class="rank-number">{{i+1}}</span><span class="rank-name">{{r.filename}} · p{{r.page}}</span><div class="score-track"><div [style.width]="scoreWidth(r.score)"></div></div><strong>{{r.score.toFixed(3)}}</strong></button>
-            <div class="why" *ngIf="showWhy&&selectedSource as r"><strong>Why this score?</strong><p>Query vector vs this chunk vector → cosine similarity {{r.score.toFixed(6)}}. The system computes dot product divided by both vector lengths. This shows vector closeness, not which exact words caused it.</p><code>Chunk vector start: [{{r.vector_preview.join(', ')}}…]</code></div>
-          </div></ng-container>
-          <div *ngIf="journey==='question'&&showExperiment&&answer" class="experiment"><div class="section-label">⚡ WHAT IF? · TOP-K</div><label>Selected chunks: {{topK}} <input type="range" min="1" [max]="MathMin(10,answer.total_candidates)" [(ngModel)]="topK"></label>
-            <p>With Top-K = {{topK}}, these {{activeRanked.length}} chunks would be passed to the LLM:</p><div *ngFor="let r of activeRanked" class="experiment-item">✓ {{r.filename}} · p{{r.page}} · {{r.score.toFixed(3)}}</div>
-            <small>This preview reuses the saved ranking. Click Re-run to generate a new answer using the changed Top-K.</small><button class="primary small-button" (click)="ask()">Re-run with Top-K {{topK}}</button></div>
-        </div></ng-container>
-        <div class="journey-nav"><button (click)="step(-1)" [disabled]="stepIndex===0">← Previous</button><span>{{stepIndex+1}} / {{stages.length}}</span><button class="primary" (click)="step(1)">{{stepIndex===stages.length-1?'↺ Replay':'Next step →'}}</button></div>
-      </section>
+
+      <!-- Composer Dock (Clean, focused on question input) -->
+      <div class="composer-dock">
+        <!-- Quick Prompt Suggestions (only when ready) -->
+        <div class="suggestions-row" *ngIf="ready.length">
+          <button class="sugg-chip" (click)="setPrompt('Summarize the key points of this document')">📄 Summarize</button>
+          <button class="sugg-chip" (click)="setPrompt('What are the main rules and procedures?')">📋 Rules</button>
+          <button class="sugg-chip" (click)="setPrompt('What are the important policies mentioned?')">📌 Policies</button>
+        </div>
+
+        <div class="composer-box">
+          <textarea
+            [(ngModel)]="question"
+            rows="2"
+            placeholder="Ask a question to trace the RAG pipeline…"
+            (keydown.enter)="onEnterKey($event)"
+            (keydown.control.enter)="ask()">
+          </textarea>
+          <div class="composer-box-foot">
+            <span class="composer-hint" *ngIf="chosenDocs.length > 0">
+              {{ chosenDocs.length }} doc(s) in scope · Enter to send · Shift+Enter for newline
+            </span>
+            <span class="composer-hint warning-hint" *ngIf="chosenDocs.length === 0">
+              ⚠️ Select at least 1 document from library to ask
+            </span>
+            <button class="send-btn" (click)="ask()"
+              [disabled]="busy || !chosenDocs.length || !question.trim()"
+              [title]="chosenDocs.length === 0 ? 'Select at least 1 document to enable RAG inspection' : 'Ask question'">
+              {{ busy ? 'Inspecting…' : 'Inspect & Ask →' }}
+            </button>
+          </div>
+        </div>
+      </div>
     </section>
+
+    <!-- Journey Drawer (right slide-in) -->
+    <div class="journey-backdrop" *ngIf="journey" (click)="journey = null"></div>
+    <aside class="journey-drawer" [class.open]="!!journey" *ngIf="journey">
+      <div class="journey-drawer-head">
+        <div>
+          <div class="eyebrow">STEP-BY-STEP DATA JOURNEY</div>
+          <h3>{{ journey === 'document' ? 'Document Ingestion Pipeline' : 'Question Answering Pipeline' }}</h3>
+          <p>Inspect: Before → Operation → After → Next</p>
+        </div>
+        <button class="journey-close" (click)="journey = null">×</button>
+      </div>
+
+      <div class="stage-tabs">
+        <button class="stage-tab" *ngFor="let stage of stages; let i = index"
+          (click)="chooseStep(i)" [class.active]="stepIndex === i">
+          <span class="stage-tab-num">{{ i + 1 }}</span>
+          <span class="stage-tab-name">{{ stage.name }}</span>
+        </button>
+      </div>
+
+      <div class="journey-content" *ngIf="currentStep as s" [class.flash]="visualPulse">
+        <div class="journey-step-label">
+          STEP {{ stepIndex + 1 }} / {{ stages.length }} · {{ s.name }}
+        </div>
+
+        <!-- BEFORE BLOCK -->
+        <div class="data-block">
+          <div class="data-block-head">
+            <div class="data-block-head-left">
+              <span class="data-block-num">1</span>
+              <span class="data-block-title">BEFORE</span>
+              <small class="data-block-sub">Input state</small>
+            </div>
+            <div class="data-block-actions">
+              <button type="button" class="json-act-btn" *ngIf="jsonViewModes['before'] !== 'raw'"
+                (click)="isCollapsed('before') ? expandAll('before') : collapseAll('before', s.before)"
+                [title]="isCollapsed('before') ? 'Expand all objects' : 'Collapse all objects'">
+                {{ isCollapsed('before') ? '▸ Expand all' : '▾ Collapse all' }}
+              </button>
+              <button type="button" class="json-act-btn toggle-view-btn"
+                (click)="toggleViewMode('before')"
+                [title]="jsonViewModes['before'] === 'raw' ? 'Switch to interactive tree view' : 'Switch to raw text view'">
+                {{ jsonViewModes['before'] === 'raw' ? '🌳 Tree' : '📄 Raw' }}
+              </button>
+              <button type="button" class="copy-json-btn" (click)="copyJson(s.before, 'before')"
+                [class.copied]="copiedBlock === 'before'"
+                title="Copy formatted JSON to clipboard">
+                <span class="copy-icon">{{ copiedBlock === 'before' ? '✓' : '📋' }}</span>
+                <span>{{ copiedBlock === 'before' ? 'Copied!' : 'Copy JSON' }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Interactive Collapsible Tree View -->
+          <div class="json-viewer-tree" *ngIf="jsonViewModes['before'] !== 'raw'">
+            <ng-container *ngTemplateOutlet="jsonNode; context: { val: clarifyJsonKeys(s.before), key: null, isLast: true, path: 'before' }"></ng-container>
+          </div>
+
+          <!-- Raw Fallback View -->
+          <div *ngIf="jsonViewModes['before'] === 'raw'">
+            <pre class="data-pre">{{ preview(s.before) }}</pre>
+            <button class="show-toggle-btn" *ngIf="hasMore(s.before)" (click)="showMore = !showMore">
+              {{ showMore ? '▴ Show less' : '▾ Show all values' }}
+            </button>
+          </div>
+        </div>
+
+        <div class="transform-arrow">↓ transformation</div>
+
+        <div class="op-block">
+          <div class="data-block-head">
+            <div class="data-block-head-left">
+              <span class="data-block-num">2</span>
+              <span class="data-block-title">OPERATION</span>
+              <small class="data-block-sub">Transformation applied</small>
+            </div>
+          </div>
+          <code class="op-code">{{ s.operation }}</code>
+        </div>
+
+        <div class="transform-arrow">↓ result</div>
+
+        <!-- AFTER BLOCK -->
+        <div class="data-block after">
+          <div class="data-block-head">
+            <div class="data-block-head-left">
+              <span class="data-block-num">3</span>
+              <span class="data-block-title">AFTER</span>
+              <small class="data-block-sub">Output state</small>
+            </div>
+            <div class="data-block-actions">
+              <button type="button" class="json-act-btn" *ngIf="jsonViewModes['after'] !== 'raw'"
+                (click)="isCollapsed('after') ? expandAll('after') : collapseAll('after', s.after)"
+                [title]="isCollapsed('after') ? 'Expand all objects' : 'Collapse all objects'">
+                {{ isCollapsed('after') ? '▸ Expand all' : '▾ Collapse all' }}
+              </button>
+              <button type="button" class="json-act-btn toggle-view-btn"
+                (click)="toggleViewMode('after')"
+                [title]="jsonViewModes['after'] === 'raw' ? 'Switch to interactive tree view' : 'Switch to raw text view'">
+                {{ jsonViewModes['after'] === 'raw' ? '🌳 Tree' : '📄 Raw' }}
+              </button>
+              <button type="button" class="copy-json-btn" (click)="copyJson(s.after, 'after')"
+                [class.copied]="copiedBlock === 'after'"
+                title="Copy formatted JSON to clipboard">
+                <span class="copy-icon">{{ copiedBlock === 'after' ? '✓' : '📋' }}</span>
+                <span>{{ copiedBlock === 'after' ? 'Copied!' : 'Copy JSON' }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Interactive Collapsible Tree View -->
+          <div class="json-viewer-tree" *ngIf="jsonViewModes['after'] !== 'raw'">
+            <ng-container *ngTemplateOutlet="jsonNode; context: { val: clarifyJsonKeys(s.after), key: null, isLast: true, path: 'after' }"></ng-container>
+          </div>
+
+          <!-- Raw Fallback View -->
+          <div *ngIf="jsonViewModes['after'] === 'raw'">
+            <pre class="data-pre">{{ preview(s.after) }}</pre>
+            <button class="show-toggle-btn" *ngIf="hasMore(s.after)" (click)="showMore = !showMore">
+              {{ showMore ? '▴ Show less' : '▾ Show all values' }}
+            </button>
+          </div>
+        </div>
+
+        <div class="next-block">
+          <div class="data-block-head">
+            <span class="data-block-num">4</span>
+            <span class="data-block-title">NEXT</span>
+            <small class="data-block-sub">What happens next</small>
+          </div>
+          <p class="next-text">{{ s.next }}</p>
+        </div>
+
+        <ng-container *ngIf="journey === 'question' && stepIndex === 3 && answer as a">
+          <div class="rank-panel">
+            <div class="rank-panel-head">ALL DOCUMENT CHUNKS · COSINE SIMILARITY SCORES</div>
+            <button class="rank-row" *ngFor="let r of a.ranked.slice(0, 10); let i = index"
+              (click)="selectSource(r); showWhy = true">
+              <span class="rank-num">{{ i + 1 }}</span>
+              <span class="rank-name">{{ r.filename }} p{{ r.page }}</span>
+              <div class="rank-bar"><div [style.width]="scoreWidth(r.score)"></div></div>
+              <strong class="rank-score">{{ r.score.toFixed(3) }}</strong>
+            </button>
+            <div class="rank-why" *ngIf="showWhy && selectedSource as r">
+              <strong>Why this score?</strong>
+              <p>Query vector vs chunk vector → cosine similarity {{ r.score.toFixed(6) }}. Measures semantic alignment between the question and this specific passage.</p>
+            </div>
+          </div>
+        </ng-container>
+
+        <div id="topk-experiment" class="experiment-block" *ngIf="journey === 'question' && (showExperiment || stepIndex === 3) && answer">
+          <div class="rank-panel-head">⚡ TOP-K EXPERIMENT</div>
+          <label class="topk-label">
+            <span class="topk-label-text">Context Chunks:</span>
+            <strong class="topk-val-badge">{{ topK }}</strong>
+            <input type="range" class="topk-slider" min="1" [max]="MathMin(15, answer.total_candidates)" [(ngModel)]="topK">
+          </label>
+          <p class="topk-desc">With Top-K = {{ topK }}, these {{ activeRanked.length }} chunks are selected:</p>
+          <div class="topk-item" *ngFor="let r of activeRanked">
+            ✓ {{ r.filename }} · p{{ r.page }} · Score: <strong>{{ r.score.toFixed(3) }}</strong>
+          </div>
+          <button type="button" class="btn-primary rerun-btn" (click)="reRunExperiment()" [disabled]="busy">
+            <span class="rerun-icon" *ngIf="!busy">⚡</span>
+            <span class="thinking-spinner-mini" *ngIf="busy"></span>
+            <span>{{ busy ? 'Re-running with Top-K ' + topK + '…' : 'Re-run with Top-K ' + topK }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="journey-nav">
+        <button class="journey-nav-btn" (click)="step(-1)" [disabled]="stepIndex === 0">← Prev</button>
+        <span class="journey-nav-pos">{{ stepIndex + 1 }} / {{ stages.length }}</span>
+        <button class="journey-nav-btn primary" (click)="step(1)">
+          {{ stepIndex === stages.length - 1 ? '↺ Replay' : 'Next →' }}
+        </button>
+      </div>
+
+      <!-- Reusable Interactive Recursive JSON Node Template -->
+      <ng-template #jsonNode let-val="val" let-key="key" let-isLast="isLast" let-path="path">
+        <!-- Object -->
+        <ng-container *ngIf="isObject(val)">
+          <div class="json-row">
+            <button type="button" class="json-arrow-btn" (click)="toggleCollapse(path)"
+              [title]="isCollapsed(path) ? 'Click to expand' : 'Click to collapse'"
+              [attr.aria-expanded]="!isCollapsed(path)">
+              <span class="json-arrow" [class.collapsed]="isCollapsed(path)">▾</span>
+            </button>
+            <span class="json-key" *ngIf="key">"{{ key }}": </span>
+            <span class="json-bracket">&#123;</span>
+            <button type="button" class="json-badge" *ngIf="isCollapsed(path)" (click)="toggleCollapse(path)"
+              title="Click to expand">
+              {{ getKeys(val).length }} {{ getKeys(val).length === 1 ? 'key' : 'keys' }} &hellip;
+            </button>
+            <span class="json-bracket" *ngIf="isCollapsed(path)">&#125;</span>
+            <span class="json-comma" *ngIf="isCollapsed(path) && !isLast">,</span>
+          </div>
+          <div class="json-block-body" *ngIf="!isCollapsed(path)">
+            <div *ngFor="let k of getKeys(val); let last = last" class="json-item">
+              <ng-container *ngTemplateOutlet="jsonNode; context: { val: val[k], key: k, isLast: last, path: path + '.' + k }"></ng-container>
+            </div>
+          </div>
+          <div class="json-row-close" *ngIf="!isCollapsed(path)">
+            <span class="json-bracket">&#125;</span><span class="json-comma" *ngIf="!isLast">,</span>
+          </div>
+        </ng-container>
+
+        <!-- Short Primitive Array (e.g. [121, 384]) -->
+        <ng-container *ngIf="isArray(val) && isShortPrimitiveArray(val)">
+          <div class="json-leaf">
+            <span class="json-leaf-spacer"></span>
+            <span class="json-key" *ngIf="key">"{{ key }}": </span>
+            <span class="json-bracket">[ </span>
+            <span *ngFor="let item of val; let i = index; let last = last">
+              <span class="json-number" *ngIf="isNumber(item)">{{ item }}</span>
+              <span class="json-string" *ngIf="isString(item)">"{{ item }}"</span>
+              <span class="json-boolean" *ngIf="isBoolean(item)">{{ item }}</span>
+              <span class="json-comma" *ngIf="!last">, </span>
+            </span>
+            <span class="json-bracket"> ]</span>
+            <span class="json-comma" *ngIf="!isLast">,</span>
+          </div>
+        </ng-container>
+
+        <!-- General Array -->
+        <ng-container *ngIf="isArray(val) && !isShortPrimitiveArray(val)">
+          <div class="json-row">
+            <button type="button" class="json-arrow-btn" (click)="toggleCollapse(path)"
+              [title]="isCollapsed(path) ? 'Click to expand' : 'Click to collapse'"
+              [attr.aria-expanded]="!isCollapsed(path)">
+              <span class="json-arrow" [class.collapsed]="isCollapsed(path)">▾</span>
+            </button>
+            <span class="json-key" *ngIf="key">"{{ key }}": </span>
+            <span class="json-bracket">[</span>
+            <button type="button" class="json-badge" *ngIf="isCollapsed(path)" (click)="toggleCollapse(path)"
+              title="Click to expand">
+              {{ val.length }} {{ val.length === 1 ? 'item' : 'items' }} &hellip;
+            </button>
+            <span class="json-bracket" *ngIf="isCollapsed(path)">]</span>
+            <span class="json-comma" *ngIf="isCollapsed(path) && !isLast">,</span>
+          </div>
+          <div class="json-block-body" *ngIf="!isCollapsed(path)">
+            <div *ngFor="let item of val; let i = index; let last = last" class="json-item">
+              <ng-container *ngTemplateOutlet="jsonNode; context: { val: item, key: null, isLast: last, path: path + '[' + i + ']' }"></ng-container>
+            </div>
+          </div>
+          <div class="json-row-close" *ngIf="!isCollapsed(path)">
+            <span class="json-bracket">]</span><span class="json-comma" *ngIf="!isLast">,</span>
+          </div>
+        </ng-container>
+
+        <!-- Primitive Strings -->
+        <div class="json-leaf" *ngIf="isString(val)">
+          <span class="json-leaf-spacer"></span>
+          <span class="json-key" *ngIf="key">"{{ key }}": </span>
+          <span class="json-string">"{{ val }}"</span>
+          <span class="json-comma" *ngIf="!isLast">,</span>
+        </div>
+
+        <!-- Primitive Numbers -->
+        <div class="json-leaf" *ngIf="isNumber(val)">
+          <span class="json-leaf-spacer"></span>
+          <span class="json-key" *ngIf="key">"{{ key }}": </span>
+          <span class="json-number">{{ val }}</span>
+          <span class="json-comma" *ngIf="!isLast">,</span>
+        </div>
+
+        <!-- Primitive Booleans -->
+        <div class="json-leaf" *ngIf="isBoolean(val)">
+          <span class="json-leaf-spacer"></span>
+          <span class="json-key" *ngIf="key">"{{ key }}": </span>
+          <span class="json-boolean">{{ val }}</span>
+          <span class="json-comma" *ngIf="!isLast">,</span>
+        </div>
+
+        <!-- Primitive Null -->
+        <div class="json-leaf" *ngIf="isNull(val)">
+          <span class="json-leaf-spacer"></span>
+          <span class="json-key" *ngIf="key">"{{ key }}": </span>
+          <span class="json-null">null</span>
+          <span class="json-comma" *ngIf="!isLast">,</span>
+        </div>
+      </ng-template>
+    </aside>
+
   </div>
-  <footer><span>RAG X-Ray · Real data, visible decisions</span><span>No event logs. No black-box scores.</span></footer>
+
+  <!-- Mobile bottom nav -->
+  <nav class="mobile-bottom-nav" *ngIf="docs.length">
+    <button class="mob-nav-btn" [class.active]="mobileTab === 'sidebar'"
+      (click)="mobileTab = mobileTab === 'sidebar' ? 'main' : 'sidebar'">
+      <span class="mob-nav-icon">📂</span>
+      <span>Library ({{ docs.length }})</span>
+    </button>
+    <button class="mob-nav-btn" [class.active]="mobileTab === 'main' && !journey"
+      (click)="mobileTab = 'main'">
+      <span class="mob-nav-icon">🔍</span>
+      <span>Inspector</span>
+    </button>
+    <button class="mob-nav-btn" *ngIf="journey" (click)="journey = null">
+      <span class="mob-nav-icon">✕</span>
+      <span>Close Journey</span>
+    </button>
+    <button class="mob-nav-btn" *ngIf="!journey && currentDoc"
+      (click)="openJourney('document')">
+      <span class="mob-nav-icon">✦</span>
+      <span>Journey</span>
+    </button>
+  </nav>
+
+  <!-- Settings Modal -->
+  <div class="modal-overlay" *ngIf="showModelSettings" (click)="showModelSettings = false">
+    <div class="modal" (click)="$event.stopPropagation()">
+      <div class="modal-head">
+        <div class="modal-title-group">
+          <span class="modal-icon">⚙️</span>
+          <div>
+            <h3>AI Model & Provider Settings</h3>
+            <small>Choose LLM: Groq / Gemini (free cloud) or local Ollama</small>
+          </div>
+        </div>
+        <button class="modal-close" (click)="showModelSettings = false">×</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="prov-tabs">
+          <button type="button" class="prov-tab" [class.active]="selectedProvider === 'groq'"
+            (click)="selectProvider('groq')">
+            <span>⚡</span> Groq <span class="tab-badge fast">Fast</span>
+          </button>
+          <button type="button" class="prov-tab" [class.active]="selectedProvider === 'gemini'"
+            (click)="selectProvider('gemini')">
+            <span>✨</span> Gemini <span class="tab-badge">Flash</span>
+          </button>
+          <button type="button" class="prov-tab" [class.active]="selectedProvider === 'ollama'"
+            (click)="selectProvider('ollama')">
+            <span>🖥</span> Ollama <span class="tab-badge free">Offline</span>
+          </button>
+          <button type="button" class="prov-tab" [class.active]="selectedProvider === 'openai'"
+            (click)="selectProvider('openai')">
+            <span>🤖</span> OpenAI <span class="tab-badge">GPT-4o</span>
+          </button>
+        </div>
+
+        <div class="prov-info" *ngIf="selectedProvider === 'groq'">
+          <strong>⚡ Groq Cloud API (Recommended)</strong>
+          <p>Ultra-fast inference with Llama 3.3 70B. Free key at
+            <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>.</p>
+        </div>
+        <div class="prov-info" *ngIf="selectedProvider === 'gemini'">
+          <strong>✨ Google Gemini API (Recommended)</strong>
+          <p>Smart reasoning with Gemini 1.5 Flash. Free key at
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">aistudio.google.com</a>.</p>
+        </div>
+        <div class="prov-info" *ngIf="selectedProvider === 'ollama'">
+          <strong>🖥 Local Ollama</strong>
+          <p>Runs offline on your machine (http://localhost:11434). Requires Ollama installed and running.</p>
+        </div>
+        <div class="prov-info" *ngIf="selectedProvider === 'openai'">
+          <strong>🤖 OpenAI API</strong>
+          <p>GPT-4o-mini or GPT-4o. API key from
+            <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com</a>.</p>
+        </div>
+
+        <div class="form-field">
+          <label class="form-label">Model Name</label>
+          <input type="text" class="form-input" [(ngModel)]="customModel"
+            placeholder="e.g. llama-3.3-70b-versatile, gemini-1.5-flash, qwen2.5-coder:7b">
+          <div class="presets-row">
+            <span class="presets-label">Presets:</span>
+            <ng-container *ngIf="selectedProvider === 'groq'">
+              <button type="button" class="preset-chip" (click)="customModel = 'llama-3.3-70b-versatile'">llama-3.3-70b-versatile</button>
+              <button type="button" class="preset-chip" (click)="customModel = 'llama-3.1-8b-instant'">llama-3.1-8b-instant</button>
+              <button type="button" class="preset-chip" (click)="customModel = 'mixtral-8x7b-32768'">mixtral-8x7b-32768</button>
+            </ng-container>
+            <ng-container *ngIf="selectedProvider === 'gemini'">
+              <button type="button" class="preset-chip" (click)="customModel = 'gemini-1.5-flash'">gemini-1.5-flash</button>
+              <button type="button" class="preset-chip" (click)="customModel = 'gemini-2.0-flash'">gemini-2.0-flash</button>
+              <button type="button" class="preset-chip" (click)="customModel = 'gemini-1.5-pro'">gemini-1.5-pro</button>
+            </ng-container>
+            <ng-container *ngIf="selectedProvider === 'ollama'">
+              <button type="button" class="preset-chip" (click)="customModel = 'qwen2.5-coder:7b'">qwen2.5-coder:7b</button>
+              <button type="button" class="preset-chip" (click)="customModel = 'llama3.2:3b'">llama3.2:3b</button>
+              <button type="button" class="preset-chip" (click)="customModel = 'deepseek-r1:8b'">deepseek-r1:8b</button>
+            </ng-container>
+            <ng-container *ngIf="selectedProvider === 'openai'">
+              <button type="button" class="preset-chip" (click)="customModel = 'gpt-4o-mini'">gpt-4o-mini</button>
+              <button type="button" class="preset-chip" (click)="customModel = 'gpt-4o'">gpt-4o</button>
+            </ng-container>
+          </div>
+        </div>
+
+        <div class="form-field" *ngIf="selectedProvider !== 'ollama'">
+          <label class="form-label">API Key</label>
+          <div class="api-key-wrap">
+            <input [type]="showApiKey ? 'text' : 'password'" class="form-input"
+              [(ngModel)]="apiKey" placeholder="Paste your API key here">
+            <button type="button" class="eye-btn" (click)="showApiKey = !showApiKey">{{ showApiKey ? '🙈' : '👁' }}</button>
+          </div>
+          <small class="key-hint">
+            Stored in browser localStorage.
+            <a *ngIf="selectedProvider === 'groq'" href="https://console.groq.com/keys" target="_blank" rel="noopener">Get free Groq key ↗</a>
+            <a *ngIf="selectedProvider === 'gemini'" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Get free Gemini key ↗</a>
+            <a *ngIf="selectedProvider === 'openai'" href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">Get OpenAI key ↗</a>
+          </small>
+        </div>
+
+        <div class="test-row">
+          <button type="button" class="test-btn" (click)="testConnection()" [disabled]="testTesting">
+            {{ testTesting ? '⏳ Testing…' : '⚡ Test Connection' }}
+          </button>
+          <div class="test-result" *ngIf="testResult"
+            [class.ok]="testResult.success" [class.fail]="!testResult.success">
+            {{ testResult.success ? '✓' : '⚠' }} {{ testResult.message }}
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-foot">
+        <button class="btn-ghost" (click)="showModelSettings = false">Cancel</button>
+        <button class="btn-primary" (click)="saveModelSettings()">✓ Save & Apply</button>
+      </div>
+    </div>
+  </div>
+
 </div>

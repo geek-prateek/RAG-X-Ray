@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="ragGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8979ff" />
+      <stop offset="100%" stop-color="#5140d8" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#ragGrad)" />
+  <g fill="#ffffff" transform="translate(32, 32)">
+    <path d="M 0,-22 C 1.5,-7 7,-1.5 22,0 C 7,1.5 1.5,7 0,22 C -1.5,7 -7,1.5 -22,0 C -7,-1.5 -1.5,-7 0,-22 Z" />
+    <path d="M -11,-11 L 11,11 M -11,11 L 11,-11" stroke="#ffffff" stroke-width="3" stroke-linecap="round" />
+    <circle cx="0" cy="0" r="3.2" fill="#ffffff" />
+  </g>
+</svg>
