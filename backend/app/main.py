@@ -35,16 +35,17 @@ app = FastAPI(
     description='Beginner-friendly, inspectable RAG pipeline with local session isolation'
 )
 
-# Configure CORS so our Angular frontend (localhost:4200) can communicate with the backend
-allowed_origins_env = os.getenv('CORS_ORIGINS', 'http://localhost:4200')
-allowed_origins = [origin.strip() for origin in allowed_origins_env.split(',')]
+# Configure CORS so our Angular frontend (localhost, Vercel, and custom domains) can communicate with backend
+allowed_origins_env = os.getenv('CORS_ORIGINS', 'http://localhost:4200,http://127.0.0.1:4200,http://localhost:8000,http://127.0.0.1:8000')
+allowed_origins = [origin.strip() for origin in allowed_origins_env.split(',') if origin.strip()]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=r'https://.*\.vercel\.app',
     allow_credentials=True,
-    allow_methods=['GET', 'POST', 'DELETE'],
-    allow_headers=['*']
+    allow_methods=['*'],
+    allow_headers=['*'],
 )
 
 # Background workers for document processing

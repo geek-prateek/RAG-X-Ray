@@ -14,6 +14,7 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
+import { environment } from '../environments/environment';
 
 // -------------------------------------------------------------
 // Type Definitions
@@ -98,8 +99,32 @@ interface Answer {
   thinking_time?: string;
 }
 
-// Backend API Base URL
-const API_URL = 'http://localhost:8000/api';
+/**
+ * Resolves the backend API URL dynamically across environments:
+ * 1. Runtime window environment override: (window as any).__ENV__?.API_URL
+ * 2. LocalStorage override for testing without rebuild: localStorage.getItem('RAG_API_URL')
+ * 3. Angular environment configuration (environment.apiUrl)
+ * 4. Auto-detect: if on localhost/127.0.0.1 dev server, use http://localhost:8000/api
+ * 5. Production fallback: '/api' (relative for Vercel rewrites or reverse proxies)
+ */
+export function getApiUrl(): string {
+  if (typeof window !== 'undefined' && (window as any).__ENV__?.API_URL) {
+    return (window as any).__ENV__.API_URL.replace(/\/$/, '');
+  }
+  const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('RAG_API_URL') : null;
+  if (stored) {
+    return stored.replace(/\/$/, '');
+  }
+  if (environment.apiUrl) {
+    return environment.apiUrl.replace(/\/$/, '');
+  }
+  if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+    return 'http://localhost:8000/api';
+  }
+  return '/api';
+}
+
+const API_URL = getApiUrl();
 
 @Component({
   selector: 'app-root',

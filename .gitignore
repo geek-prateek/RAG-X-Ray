@@ -52,6 +52,13 @@ yarn-debug.log*
 yarn-error.log*
 
 # ==========================================
+# Deployment & Hosting (Vercel)
+# ==========================================
+.vercel/
+**/.vercel/
+frontend/.vercel/
+
+# ==========================================
 # Runtime Data & Storage
 # ==========================================
 data/
@@ -68,6 +75,7 @@ chroma/
 .env
 .env.*
 !.env.example
+*.local.ts
 
 # ==========================================
 # IDE & System Files
