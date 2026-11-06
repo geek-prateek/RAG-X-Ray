@@ -4,7 +4,8 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12-3776AB?logo=python&logoColor=white)](https://python.org/)
 [![ChromaDB](https://img.shields.io/badge/Vector_DB-ChromaDB-FF6600)](https://www.trychroma.com/)
-[![Sentence Transformers](https://img.shields.io/badge/Embeddings-all--MiniLM--L6--v2-yellow)](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)
+[![FastEmbed](https://img.shields.io/badge/Embeddings-FastEmbed_ONNX_(384D)-yellow)](https://github.com/qdrant/fastembed)
+[![MCP Server](https://img.shields.io/badge/MCP_Server-Live_SSE-blueviolet)](https://rag-xray-backend.onrender.com/mcp/sse)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 **RAG X-Ray** is an educational, interactive, open-source tool designed to demystify how Retrieval-Augmented Generation (RAG) actually works under the hood. Instead of treating RAG as a black box with opaque developer traces, RAG X-Ray opens up the pipeline into a visual, step-by-step **Before → Operation → After → Next** data journey with real intermediate values.
@@ -47,6 +48,11 @@
 ### 6. 📱 Responsive & Mobile-Optimized
 - Full mobile-adaptive layout with dedicated bottom tab navigation (`Library`, `Chat`, `Data Journey`).
 - Seamless transitions between document exploration, query tracing, and LLM output.
+
+### 7. 🔌 Model Context Protocol (MCP) Server
+- **Remote SSE Endpoint:** Live on `https://rag-xray-backend.onrender.com/mcp/sse`.
+- **AI Agent Integration:** Connect Cursor IDE, Claude Desktop, or Windsurf directly without installing Python.
+- **RAG Inspector & Evaluator:** 6 specialized diagnostic tools to audit cosine scores, score dropoff, chunk boundaries, and hallucination risks.
 
 ---
 
@@ -93,6 +99,67 @@
 - **Python:** `3.11` or `3.12` recommended.
 - **Node.js:** `20.19+` or `22.12+` with `npm`.
 - **(Optional) Ollama:** For local LLM answer generation ([Download Ollama](https://ollama.com/)).
+
+---
+
+## 🔌 Model Context Protocol (MCP) Server
+
+RAG X-Ray includes a built-in **Inspector & Evaluator MCP Server** hosted live via Server-Sent Events (SSE). It transforms RAG X-Ray from a standalone playground into a remote diagnostic engine for AI assistants such as **Cursor IDE**, **Claude Desktop**, and **Antigravity / Windsurf**.
+
+### Live SSE Endpoint (No Local Setup Required)
+```http
+https://rag-xray-backend.onrender.com/mcp/sse
+```
+
+### 🛠️ Connecting to Cursor IDE
+
+#### Option A: Settings UI (1-Click)
+1. Open Cursor ➔ **Cursor Settings** (Gear icon or `Ctrl+,` / `Cmd+,`) ➔ **Features** ➔ **MCP**.
+2. Click **+ Add New MCP Server**:
+   - **Name:** `rag-xray`
+   - **Type:** `sse`
+   - **URL:** `https://rag-xray-backend.onrender.com/mcp/sse`
+3. Save. Once connected (green status indicator), all 6 diagnostic tools will be accessible to Cursor's agent.
+
+#### Option B: Workspace Config (`.cursor/mcp.json`)
+If you open this repository in Cursor, it is already pre-configured in `.cursor/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "rag-xray": {
+      "url": "https://rag-xray-backend.onrender.com/mcp/sse"
+    }
+  }
+}
+```
+
+---
+
+### 🧰 Available MCP Diagnostic & Evaluation Tools
+
+| MCP Tool | Purpose & Diagnostic Value |
+| :--- | :--- |
+| **`evaluate_retrieval(query, top_k)`** | Evaluates query against knowledge base. Returns **Confidence Verdict** (`EXCELLENT`, `MODERATE`, `POOR_MATCH_HIGH_HALLUCINATION_RISK`), cosine score, and score dropoff to prevent LLM hallucinations. |
+| **`compare_semantic_similarity(text_a, text_b)`** | Computes exact cosine similarity (-1.0 to 1.0) and semantic overlap percentage between two texts to diagnose query-chunk alignment. |
+| **`inspect_vector_embedding(text)`** | Inspects the 384-dimensional dense ONNX vector, L2 norm, and first 8 float preview components for any text. |
+| **`diagnose_document_chunking(document_id)`** | Audits sliding-window chunks (90 words, 18 overlap), word counts, and boundary cuts for anomalies. |
+| **`list_indexed_documents()`** | Lists all indexed documents, chunk counts, page counts, and indexing readiness. |
+| **`index_document_text(filename, content)`** | Ingests raw text, code, or policies directly from Cursor/Claude into the vector store. |
+
+---
+
+### 💬 Real-World Demo Prompts in Cursor
+
+Once connected, ask Cursor:
+
+- **Retrieval Evaluation:**
+  > `@rag-xray evaluate_retrieval for question 'What is the policy for annual leave?' and report the confidence score and hallucination risk.`
+
+- **Semantic Comparison:**
+  > `@rag-xray compare_semantic_similarity between 'Employees request leave on portal' and 'I want to take 3 days off'.`
+
+- **Vector Math Inspection:**
+  > `@rag-xray inspect_vector_embedding for the phrase 'Retrieval-Augmented Generation pipeline'.`
 
 ---
 
@@ -192,10 +259,13 @@ All 6 test suites verify text extraction, chunk boundary preservation, vector sc
 
 ```text
 rag-xray/
+├── .cursor/
+│   └── mcp.json            # Pre-configured Cursor MCP SSE integration
 ├── backend/
 │   ├── app/
-│   │   ├── engine.py       # Chunking, embeddings, cosine similarity, Ollama client
-│   │   ├── main.py         # FastAPI endpoints, session routes, data journey payloads
+│   │   ├── engine.py       # FastEmbed ONNX chunking, embeddings, cosine similarity, LLM client
+│   │   ├── main.py         # FastAPI endpoints, MCP SSE mount, session routes, data journey
+│   │   ├── mcp_server.py   # RAG X-Ray Inspector & Evaluator MCP server (6 diagnostic tools)
 │   │   └── storage.py      # Local session isolation, document metadata, ChromaDB persistence
 │   ├── tests/              # Pytest test suites
 │   ├── Dockerfile
