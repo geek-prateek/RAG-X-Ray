@@ -357,20 +357,51 @@ async def upload_document(
     return {'document_id': doc['id'], 'status': 'queued'}
 
 
+DEFAULT_SAMPLE_HANDBOOK = (
+    "Employee Handbook\n\n"
+    "Annual Leave\n"
+    "Employees can request annual leave through the HR portal. Open the Leave section, select the dates, "
+    "provide a reason if needed, and submit the request. The manager reviews the request and approves "
+    "or rejects it. Once approved, employees receive a notification.\n\n"
+    "Password Reset\n"
+    "Employees can reset their password using the Forgot Password link on the login page. "
+    "A one-time link is sent to the registered email address.\n\n"
+    "Payroll Schedule\n"
+    "Payroll is processed on the last working day of each month. Employees can access payslips from the "
+    "employee portal after payroll processing is complete.\n\n"
+    "Technology Training\n"
+    "Python is commonly used for AI and machine learning. Angular is a frontend framework used for interactive "
+    "web applications.\n"
+)
+
+
 @app.post('/api/documents/sample', status_code=202)
 def load_sample_document(x_session_id: str = Header(default='default', alias='X-Session-ID')):
     """
-    Loads the built-in sample_docs/employee_handbook.txt with 1 click.
+    Loads the built-in sample Employee Handbook with 1 click.
     Provides instant hands-on demonstration without requiring manual file uploads.
     """
-    sample_path = Path(__file__).resolve().parent.parent.parent / 'sample_docs' / 'employee_handbook.txt'
-    if not sample_path.exists():
-        sample_path = Path('sample_docs/employee_handbook.txt')
-    if not sample_path.exists():
-        raise HTTPException(status_code=404, detail='Sample document file not found on server')
-
-    content = sample_path.read_bytes()
     filename = 'employee_handbook.txt'
+    possible_paths = [
+        Path(__file__).resolve().parent / 'sample_docs' / filename,
+        Path(__file__).resolve().parent.parent / 'sample_docs' / filename,
+        Path(__file__).resolve().parent.parent.parent / 'sample_docs' / filename,
+        Path('sample_docs') / filename,
+        Path('/app/sample_docs') / filename,
+    ]
+    content = None
+    for p in possible_paths:
+        if p.exists():
+            try:
+                content = p.read_bytes()
+                if content:
+                    break
+            except Exception:
+                pass
+
+    if not content:
+        content = DEFAULT_SAMPLE_HANDBOOK.encode('utf-8')
+
     doc = storage.new_doc(filename, session_id=x_session_id)
     storage.save_raw_file(doc['id'], filename, content, session_id=x_session_id)
     workers.submit(process_document_background, doc['id'], content, x_session_id)
