@@ -48,6 +48,14 @@ app.add_middleware(
     allow_headers=['*'],
 )
 
+# Mount Model Context Protocol (MCP) SSE Server for Cursor, Claude Desktop, and AI agents
+from app.mcp_server import mcp as mcp_server
+from mcp.server.transport_security import TransportSecuritySettings
+
+mcp_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+app.mount("/mcp", mcp_server.sse_app(transport_security=mcp_security))
+
+
 # Background workers for document processing
 workers = ThreadPoolExecutor(max_workers=2)
 

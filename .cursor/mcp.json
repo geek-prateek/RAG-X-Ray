@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "rag-xray": {
+      "url": "https://rag-xray-backend.onrender.com/mcp/sse"
+    }
+  }
+}
