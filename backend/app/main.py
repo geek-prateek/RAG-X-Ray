@@ -210,7 +210,7 @@ def process_document_background(doc_id: str, content: bytes, session_id: str = '
                 'document_chunks_to_embed': len(chunks),
                 'first_document_chunk_sample': engine.excerpt(chunks[0]['text'])
             },
-            operation='Convert text chunks into 384-dimensional dense vectors using SentenceTransformer (all-MiniLM-L6-v2)',
+            operation=f'Convert text chunks into 384-dimensional dense vectors using FastEmbed ONNX ({engine.MODEL_NAME})',
             after={
                 'embedding_model_used': engine.MODEL_NAME,
                 'total_chunk_vectors_generated': int(vectors.shape[0]),
@@ -648,7 +648,7 @@ def ask_question(
                 'user_question_text': body.question,
                 'embedding_model': engine.MODEL_NAME
             },
-            'operation': f'SentenceTransformer("{engine.MODEL_NAME}").encode([user_question], normalize_embeddings=True)',
+            'operation': f'FastEmbed("{engine.MODEL_NAME}").embed([user_question])',
             'after': {
                 'embedding_model': engine.MODEL_NAME,
                 'query_vector_dimensions': len(question_vector),

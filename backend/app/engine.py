@@ -31,15 +31,15 @@ MODEL_NAME = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v
 
 def get_embedder():
     """
-    Loads and returns the SentenceTransformer model.
+    Loads and returns the FastEmbed TextEmbedding ONNX model.
     Uses lazy-loading (thread-safe) so the server starts instantly.
     """
     global _EMBEDDER
     if _EMBEDDER is None:
         with _EMBED_LOCK:
             if _EMBEDDER is None:
-                from sentence_transformers import SentenceTransformer
-                _EMBEDDER = SentenceTransformer(MODEL_NAME)
+                from fastembed import TextEmbedding
+                _EMBEDDER = TextEmbedding(model_name=MODEL_NAME)
     return _EMBEDDER
 
 
@@ -47,15 +47,19 @@ def embed(texts: list[str]) -> np.ndarray:
     """
     Converts a list of text strings into normalized vector embeddings.
     Each vector has 384 floating-point numbers.
-    'normalize_embeddings=True' scales vector length to 1.0,
-    which makes the dot product equal to cosine similarity.
+    FastEmbed produces normalized vectors (L2 norm = 1.0) via ONNX runtime,
+    making dot product equal to cosine similarity with low (~100MB) RAM usage.
     """
     if not texts:
         return np.empty((0, 0), dtype=np.float32)
 
     embedder = get_embedder()
-    vectors = embedder.encode(texts, normalize_embeddings=True)
-    return np.asarray(vectors, dtype=np.float32)
+    # Batch size of 16 to keep memory strictly bounded even for large documents
+    vectors = list(embedder.embed(texts, batch_size=16))
+    arr = np.asarray(vectors, dtype=np.float32)
+    norms = np.linalg.norm(arr, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    return arr / norms
 
 
 def excerpt(text: str, limit: int = 340) -> str:
