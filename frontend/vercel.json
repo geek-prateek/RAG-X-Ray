@@ -1,10 +1,11 @@
+
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "cleanUrls": true,
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://YOUR-RENDER-URL.onrender.com/api/:path*"
+      "destination": "https://rag-xray-backend.onrender.com/api/:path*"
     },
     {
       "source": "/(.*)",
